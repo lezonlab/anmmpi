@@ -1,7 +1,7 @@
 /*
   Licensed under the MIT License (MIT)
 
-  Copyright (c) 2008-2015 Timothy Lezon
+  Copyright (c) 2014-2016 Timothy Lezon
 
   This file is part of the ANMMPI software package
 
@@ -45,7 +45,6 @@
      -ko     Specify knockouts
      -b      Specify CypA binding site (HIV-1 specific)
      -p      Suppress normal output and print projection matrix
-     -h      Suppress normal output and print Hessian matrix
 */
 
 #include "nrstuff.h"
@@ -66,7 +65,7 @@ double g_anm_cutoff = 15.0;
 double g_anm_gamma = 1.0;
 double g_anm_eta = 10.0;
 int g_bound_resid = 89;
-int g_num_eigs = 20;
+//int g_num_eigs = 20;
 const double g_anm_cutoff_default = 15.0;
 const double g_anm_gamma_default = 1.0;
 const double g_anm_eta_default = 10.0;
@@ -79,7 +78,7 @@ typedef struct {char **HEADER; Atom_Line *atom; int num_residues; int num_header
 typedef struct {int **IDX; double *X; } dSparse_Matrix;
 
 /* Structure to hold command-line arguments */
-typedef struct {char *infile; int is_blocks; int *KO; int nko; int print_prj_mtx; int add_cypa; int print_hessian_mtx;} Local_CL_Opt;
+typedef struct {char *infile; int is_blocks; int *KO; int nko; int print_prj_mtx; int add_cypa;} Local_CL_Opt;
 
 void ReadCommandLine(int argc, char *argv[], Local_CL_Opt *CL);
 void CondensePrjMtx(dSparse_Matrix *projection_matrix, int num_projection_elements);
@@ -87,8 +86,6 @@ int AssignChainStarts(PDB_File *pdb, int num_pdbs, int **chain_starts, double **
 		      double **mer_centers, int num_chains);
 int AssignCypaContacts(PDB_File *pdb, int num_pdbs, int **chain_starts, double **chain_directions, 
 		       int **cypa_contacts, int num_chains, int num_blocks, double **mer_centers, int num_mers);
-void PrintCypaLines(char *filename, PDB_File *pdb, int **cypa_contacts, 
-		    int **blockmap, int *blockmap_index, int num_blocks);
 int hintelemstr(char *text,int *H,int nn);
 int nintelemstr(char *text);
 void SortIntMatrixByCol(int **RA,int rlo,int rhi,int clo,int chi,int idx);
@@ -123,18 +120,18 @@ int main(int argc,char *argv[])
   double **HH;
   double **block_center_of_mass;
   double **mer_centers;
-  double *A,*VAL,**VEC;
-  int *RIDX,*CIDX;
+  //double *A,*VAL,**VEC;
+  //int *RIDX,*CIDX;
   char **pdbfilenames;
   char *outfile;
   char *bunk;
-  double dd;
+  //double dd;
   int num_residues,total_residues,num_input_blocks;
   int max_block_size,num_blocks,bdim;
   int num_pdbs,num_headers,num_models;
   int num_projection_elements;
   int f,i,j,k,p;
-  int kold;
+  //int kold;
   int num_block_contacts;
   int num_chains=0,num_mers=0;
   int **chain_starts;
@@ -179,6 +176,10 @@ int main(int argc,char *argv[])
     outfile = (char *)calloc((size_t) (strlen(argv[1])+99),sizeof(char));
     bunk = (char *)calloc(99,sizeof(char));
     strncpy(outfile,argv[1],strlen(argv[1])-strlen(strrchr(argv[1],'.')));
+    if(CL.nko==0) sprintf(bunk,"-%03d",0);
+    else if (CL.nko==1) sprintf(bunk,"-%03d",CL.KO[1]);
+    else sprintf(bunk,"-%s","xxx");
+    strcat(outfile,bunk);
     strcat(outfile,".something");
   }
 
@@ -345,17 +346,6 @@ int main(int argc,char *argv[])
 					     block_center_of_mass, num_pdbs, num_blocks, g_anm_cutoff, 
 					     chain_starts, cypa_contacts, num_chains);
 
-  /* Create a TCL file showing CypA as cylinders */
-  if(rank==0){ 
-    tdiff = MPI_Wtime() - tlast;
-    fprintf(stderr,"Finished in %e seconds\n",tdiff);
-    fprintf(stderr,"%d block contacts found\n",num_block_contacts);
-    if(CL.add_cypa==1){
-      outfile[(int)(strlen(outfile)-strlen(strrchr(outfile,'.')))+1]='\0';
-      strcat(outfile,"tcl");
-      PrintCypaLines(outfile, PDB, cypa_contacts, blockmap, blockmap_index, num_blocks);
-    }
-  }
 
   /* ---------------------- Parallel --------------------- */
   /* Everything up to this point has been done on all processors simultaneously. It's a waste of compute 
@@ -415,107 +405,29 @@ int main(int argc,char *argv[])
   /* ------------------------------- End of parallel part --------------------------------- */
 
 
-  /* Print block Hessian to file, if requested */ 
-  if(CL.print_hessian_mtx==1){
-    if(rank==0){
-      outfile[(int)(strlen(outfile)-strlen(strrchr(outfile,'.')))+1]='\0';
+  /* Print block Hessian to file */ 
+  if(rank==0){
+    outfile[(int)(strlen(outfile)-strlen(strrchr(outfile,'.')))+1]='\0';
+    if(CL.is_blocks==1){
       strcat(outfile,"blockhessian");
       fprintf(stderr,"Writing block Hessian to %s\n",outfile);
-      if((data=fopen(outfile,"w"))==NULL){
-	fprintf(stderr,"\n%s: Unable to open %s\n\n",argv[0],outfile);
-	exit(1);}
-      for(i=1; i<=bdim; i++)
-	for(j=i; j<=bdim; j++)
-	  if(fabs(HH[i][j]) > 1.0e-10)
-	    fprintf(data,"%8d%8d% 20.10e\n",i,j,HH[i][j]);
-      fclose(data);
-      tdiff = MPI_Wtime() - t0;
-      fprintf(stderr,"Elapsed time: %e seconds\n",tdiff);
-      free(outfile);
-      free(bunk);
     }
-    free_cmatrix(pdbfilenames,1,num_pdbs,0,RTB_WORD_LENGTH);
-    for(f=1;f<=num_pdbs;f++) free_pdb(&(PDB[f]));
-    free(PDB);
-    free(CL.infile);
-    free_imatrix(projection_matrix.IDX,1,12*total_residues,1,2);
-    free_dvector(projection_matrix.X,1,12*total_residues);
-    free_dmatrix(block_center_of_mass,1,num_blocks,1,3);
-    free_imatrix(chain_starts,1,num_chains,1,3);
-    free_dmatrix(chain_directions,1,num_chains,0,2);
-    free_dmatrix(mer_centers,1,num_chains,0,2);
-    free_imatrix(cypa_contacts,1,num_blocks,1,num_blocks);
-    MPI_Finalize();
-    return 0;
-  }
-
-  /* Decompose the Hessian */
-  else if(rank==0){
-    ne = 0;
+    else{
+      strcat(outfile,"sparsehessian");
+      fprintf(stderr,"Writing sparse Hessian to %s\n",outfile);
+    }
+    if((data=fopen(outfile,"w"))==NULL){
+      fprintf(stderr,"\n%s: Unable to open %s\n\n",argv[0],outfile);
+      exit(1);}
     for(i=1; i<=bdim; i++)
       for(j=i; j<=bdim; j++)
-	if(fabs(HH[i][j]) > 1.0e-10) ne++;
-    A = dvector(0,ne-1);
-    RIDX = ivector(0,ne-1);
-    CIDX = ivector(0,ne-1);
-    k = 0;
-    for(i=1; i<=bdim; i++)
-      for(j=i; j<=bdim; j++)
-	if(fabs(HH[i][j]) > 1.0e-10){
-	  RIDX[k] = i;
-	  CIDX[k] = j;
-	  A[k] = HH[i][j];
-	  k++;
-	}
-    free_dmatrix(HH, 1, 6*num_blocks, 1, 6*num_blocks);
-    VAL = dvector(1,g_num_eigs);
-    VEC = dmatrix(1,bdim,1,g_num_eigs);
-    blzSolveSparse(A, RIDX, CIDX, ne, VAL, VEC, bdim, g_num_eigs);
-    outfile[(int)(strlen(outfile)-strlen(strrchr(outfile,'.')))+1]='\0';
-    strcat(outfile,"val");
-    data = fopen(outfile,"w");
-    for(i=1; i<=g_num_eigs; i++) fprintf(data,"% 16.7e\n",VAL[i]);
+	if(fabs(HH[i][j]) > 1.0e-10)
+	  fprintf(data,"%8d%8d% 20.10e\n",i,j,HH[i][j]);
     fclose(data);
-    outfile[(int)(strlen(outfile)-strlen(strrchr(outfile,'.')))+1]='\0';
-    strcat(outfile,"vec");
-    data = fopen(outfile,"w");
-
-    /* Print the block vectors */
-    /*
-    for(i=1; i<=bdim; i++){
-      for(j=1; j<=g_num_eigs; j++) fprintf(data,"% 16.7e",VEC[i][j]);
-      fprintf(data,"\n");
-    }
-    */
-
-    /* Print the all-residue vectors */
-    k = kold = 1;
-    for(i=1; i<=total_residues; i++){
-      for(j=1; j<=g_num_eigs; j++){
-	dd = 0.0;
-	k = kold;
-	while(k<num_projection_elements && projection_matrix.IDX[k][1]==i){
-	  p = projection_matrix.IDX[k][2];
-	  dd += projection_matrix.X[k]*VEC[p][j];
-	  k++;
-	}
-	fprintf(data,"% 16.7e",dd);
-      }
-      kold = k;
-      fprintf(data,"\n");
-    }
-    fclose(data);
-
-    /* Check time */
     tdiff = MPI_Wtime() - t0;
     fprintf(stderr,"Elapsed time: %e seconds\n",tdiff);
     free(outfile);
     free(bunk);
-    free_dvector(A,0,ne-1);
-    free_ivector(RIDX,0,ne-1);
-    free_ivector(CIDX,0,ne-1);
-    free_dvector(VAL,1,g_num_eigs);
-    free_dmatrix(VEC,1,bdim,1,g_num_eigs);
   }
 
   /* ------------------------------ Free! ------------------------------ */
@@ -546,12 +458,10 @@ void ReadCommandLine(int argc,char *argv[],Local_CL_Opt *CL)
   /* Allowed flags:
      -c      Specify cutoff distance
      -s      Specify perturbation scaling factor
-     -n      Specify number of eigenvalue/eigenvector pairs to calculate
      -rtb    Assume input is RTB definitions, instead of PDB file
      -ko     Specify knockouts
      -l      Specify CypA binding site (HIV-1 specific)
      -p      Suppress normal output and print projection matrix
-     -h      Suppress normal output and print Hessian matrix
   */
 
   if(argc > 1){
@@ -563,7 +473,6 @@ void ReadCommandLine(int argc,char *argv[],Local_CL_Opt *CL)
     CL->nko = 0;
     CL->print_prj_mtx = 0;
     CL->add_cypa = 0;
-    CL->print_hessian_mtx = 0;
     CL->is_blocks = 0;
 
     /* Go through arguments */
@@ -576,10 +485,8 @@ void ReadCommandLine(int argc,char *argv[],Local_CL_Opt *CL)
 	hintelemstr(argv[i],CL->KO,CL->nko);
       }
       else if(strncmp(argv[i],"-p",2)==0) CL->print_prj_mtx = 1;                 /* Print projection matrix */
-      else if(strncmp(argv[i],"-h",2)==0) CL->print_hessian_mtx = 1;             /* Print Hessian matrix */
-      else if(strncmp(argv[i],"-rtb",4)==0) CL->is_blocks = 1;                /* Block File */
+      else if(strncmp(argv[i],"-rtb",4)==0) CL->is_blocks = 1;                   /* Block File */
       else if(strncmp(argv[i],"-s",2)==0) sscanf(argv[++i],"%lf",&g_anm_eta);    /* Scale factor */
-      else if(strncmp(argv[i],"-n",2)==0) sscanf(argv[++i],"%d",&g_num_eigs);    /* Number of eigenvalues */
       else if(strncmp(argv[i],"-l",2)==0){                                       /* CypA binding  */
 	sscanf(argv[++i],"%d",&g_bound_resid);
 	CL->add_cypa = 1;
@@ -600,15 +507,13 @@ void ReadCommandLine(int argc,char *argv[],Local_CL_Opt *CL)
     fprintf(stderr,"OPTIONS:\n");
     fprintf(stderr,"\t-c CUT\tSet ANM cutoff distance to CUT (def %.3f)\n",g_anm_cutoff);
     fprintf(stderr,"\t-s SCL\tSet perturbation scaling factor to SCL (def %.3f)\n",g_anm_eta);
-    fprintf(stderr,"\t-n NUM\tCalculate NUM eigenvalue/eigenvector pairs (def %d)\n",g_num_eigs);
     fprintf(stderr,"\t-rtb\tAssume input is RTB definitions, instead of PDB file\n");
     fprintf(stderr,"\t-ko\tSpecify indices of residues to perturb\n");
     fprintf(stderr,"\t\tAccepts integers separated by commas (no white space!),\n");
     fprintf(stderr,"\t\tas well as ranges indicated with dashes\n");
     fprintf(stderr,"\t-l RES\tBind neighboring chains at RES (HIV-specific)\n");
     fprintf(stderr,"\t-p\tSuppress normal output and print projection matrix\n");
-    fprintf(stderr,"\t-h\tSuppress normal output and print Hessian matrix\n");
-    fprintf(stderr,"\nOutput:\nCalculates eigenvalues and eigenvectors\n\n");
+    fprintf(stderr,"\nOutput:\nCalculates block Hessian matrix.\n\n");
     exit(1);
   }
 }
@@ -817,41 +722,6 @@ int AssignCypaContacts(PDB_File *pdb, int num_pdbs, int **chain_starts, double *
   free_ivector(num_bound,1,num_chains);
   free_ivector(block_for_chain,1,num_chains);
   return num_contacts;
-}
-
-/* "PrintCypaLines" generates a TCL file that shows CypA molecules as cylinders. */
-void PrintCypaLines(char *filename, PDB_File *pdb, int **cypa_contacts, 
-		    int **blockmap, int *blockmap_index, int num_blocks)
-{
-  FILE *data;
-  int color = 0;
-  int i,j,k;
-
-  if((data=fopen(filename,"w"))==NULL){
-    fprintf(stderr,"\nPrintCypaLines: Unable to open '%s'\n",filename);
-    exit(1);}
-
-  /* This prints cylinders */
-  fprintf(data,"draw color %d\n",color);
-  for(i=1; i<=num_blocks; i++)
-    for(j=i+1; j<=num_blocks; j++)
-      if(cypa_contacts[i][j] != 0){
-	for(k=blockmap_index[i]; k<blockmap_index[i+1]; k++)
-	  if(pdb[blockmap[k][2]].atom[blockmap[k][3]].resnum == g_bound_resid){
-	    fprintf(data,"draw cylinder {%.3f %.3f %.3f} ", pdb[blockmap[k][2]].atom[blockmap[k][3]].X[0], 
-		    pdb[blockmap[k][2]].atom[blockmap[k][3]].X[1], pdb[blockmap[k][2]].atom[blockmap[k][3]].X[2]);
-	    break;
-	  }
-	for(k=blockmap_index[j]; k<blockmap_index[j+1]; k++)
-	  if(pdb[blockmap[k][2]].atom[blockmap[k][3]].resnum == g_bound_resid){
-	    fprintf(data,"{%.3f %.3f %.3f} radius 5.1 resolution 10\n", 
-		    pdb[blockmap[k][2]].atom[blockmap[k][3]].X[0], pdb[blockmap[k][2]].atom[blockmap[k][3]].X[1], 
-		    pdb[blockmap[k][2]].atom[blockmap[k][3]].X[2]);
-	    break;
-	  }
-      }
-  fclose(data);
-  return;
 }
 
 /* "hintelemstr" places the integer elements specified 
