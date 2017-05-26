@@ -1,0 +1,149 @@
+
+------------------------------
+ANMMPI
+07/12/2016
+------------------------------
+
+Quick calculation of ANM modes using MPI-based parallel code.
+Quick eigendecomposition of Hessian matrices using dynamically
+allocated BLZPACK.
+
+==========================================================
+
+1. Requirements
+2. Installation
+3. File descriptions
+4. Examples
+
+==========================================================
+
+All of this code was built and tested on a Linux machine running 
+Mint 17 (qiana) and using the Ubuntu 3.13.0-24-generic kernel.
+Code was executed on an Intel Core i7-4770K CPU @ 3.50GHz. 
+Executables were built using the Gnu C compiler (GCC) and MPI C 
+compiler (MPICH). 
+
+1. Requirements
+
+The code requires a C compiler and an MPI implementation. Nothing further 
+is needed for constructing Hessian matrices. I recommend GCC and MPICH.
+
+For matrix decomposition, several libraries are required:
+
+-- LAPACK (http://www.netlib.org/lapack/) is a Linear Algebra PACKage 
+that can be found in standard repositories.
+
+-- BLAS (http://www.netlib.org/blas/) is a collection of Basic Linear 
+Algebra Subprograms. It can be found in standard repositories.
+
+-- BLZPACK (http://crd-legacy.lbl.gov/~osni/) is a Block LancZos PACKage 
+for handling sparse matrices. It can be obtained for free from Lawrence 
+Berkeley National Lab.
+
+-- MA47 (http://www.hsl.rl.ac.uk/) is a library of matrix routines that 
+can be obtained for free for academic use.
+
+
+2. Installation
+
+To compile:
+
+$ ./configure
+$ make
+
+Two binaries are created in ./src:
+anmmpi -- a GUI
+anmmpi_cl -- the command-line version
+
+The software generates a Hessian matrix using 
+the RTB approximation and a modified ANM potential in the 
+x- and y- directions.  
+
+
+================================================================
+2. File descriptions
+
+-----------------
+Example files
+-----------------
+hex_of_hex.blk
+
+
+----------------------------------------------------------------
+blockfiles
+----------------------------------------------------------------
+
+The input to imANM is referred to as a 'blockfile', which describes 
+the rigid blocks that are to be used.   The first 6 characters in
+each row of the blockfile are a header that indicate the type of data in 
+the row (similar to a PDB file).  There are currently 3 types of 
+required headers:
+
+PDB	Indicates the name (including path) of a PDB file to be 
+	used in the calculation. These lines have the format
+
+	PDB filename.pdb file_id
+
+	The file ID is a string (no whitespace) that uniquely 
+	identifies the file. This allows multiple PDB files to 
+	be used as input to anmmpi.
+
+BLOCK	Defines a rigid block. Each line contains 9 columns, 
+	separated by whitespace:
+
+	1. The header 'BLOCK'
+	2. Integer identifier of the block.
+	3. The file_id of the PDB where the block is located.
+	4. Three-letter code for first residue in block.
+	5. Chain ID of first residue in block.
+	6. Sequential number of first residue in block.
+	7. Three-letter code for last residue in block.
+	8. Chain ID of last residue in block.
+	9. Sequential number of last residue in block.
+
+	Blocks do not have to appear in order, and several blocks
+	assigned to the same block ID will be grouped together in
+	the calculation. This allows blocks to extend across PDB 
+	files. Blocks of single residues are allowed, and are 
+	treated as point particles. Blocks of two residues are
+	discouraged. These are separated into two one-residue blocks.
+
+END	Indicates the end of the BLOCK definitions and the file.
+
+Rows beginning with '#' are considered comments.
+
+
+
+====================================================================
+3. Example
+--------------------------------------------------------------------
+As an example, the blockfile 'hex_of_hex.blk' is provided, along with its 
+associated PDB files 'hex[123].pdb'.
+
+To view the command-line options of anmmpi, simply run the program without 
+an input file:
+
+$ anmmpi_cl
+
+The code should be run using MPI software, represented here by 'mpirun'. 
+
+To run a simple ANM job in parallel using anmmpi:
+$ mpirun -np NUM anmmpi_cl ../pdb/1aon_ca.pdb
+
+This command tells anmmpi to run on NUM processors. When it completes,
+a file called '1aon_ca.sparsehessian' will appear in ../pdb. This can 
+be decomposed with blzdecomp, discussed later. 
+
+To generate a RTB Hessian from the blocks:
+$ mpirun -np NUM anmmpi_cl hex_of_hex.blk
+
+The .blk extension indicates that the input file is a blockfile, not a PDB
+file. The program reads the block definitions and the PDB file(s), calculates
+the ANM Hessian, decomposes it, and prints eigenmodes to files.
+
+The files 'hex_of_hex.val' and 'hex_of_hex.vec' contain the first 20 eigenvalues 
+and eigenvectors of the system.  
+The eigenvectors contain 29106 components, corresponding to 
+x-, y- and z-components for each of the 9702 residues.  
+
+
